@@ -16,12 +16,12 @@ import os
 import sys
 from subprocess import Popen, PIPE
 
-# CloudFlare api url.
+# CloudFlare API URL.
 CLOUDFLARE_URL = 'https://api.cloudflare.com/client/v4'
 
 # Time-to-live for your A record. This should be as small as possible to ensure
-# changes aren't cached for too long and are propogated quickly.  CloudFlare's
-# api docs set a minimum of 120 seconds.
+# changes aren't cached for too long and are propagated quickly. CloudFlare's
+# API docs set a minimum of 120 seconds.
 TTL = '120'
 
 # DNS record type for your DDNS host. Probably an A record.
@@ -46,7 +46,7 @@ def main():
 
     # Read config file
     with open(CONFIG_FILE, 'r') as f:
-        config = yaml.load(f)
+        config = yaml.load(f, Loader=yaml.SafeLoader)  # Se agrega el Loader
 
     cf_key = config.get('cf_key')
     cf_email = config.get('cf_email')
@@ -64,18 +64,18 @@ def main():
 
     ### Discover your public IP address.
     if aws_use_ec2metadata:
-      try:
-        p = Popen(
-            ["ec2metadata", "--public-ip"],
-            stdin=PIPE,
-            stdout=PIPE,
-            stderr=PIPE,
-        )
-        output, err = p.communicate()
-        rc = p.returncode
-        public_ip = output.rstrip('\n')
-      except:
-        die("Failed to query AWS ec2metadata for public IP")
+        try:
+            p = Popen(
+                ["ec2metadata", "--public-ip"],
+                stdin=PIPE,
+                stdout=PIPE,
+                stderr=PIPE,
+            )
+            output, err = p.communicate()
+            rc = p.returncode
+            public_ip = output.rstrip('\n')
+        except Exception:
+            die("Failed to query AWS ec2metadata for public IP")
     elif use_dig:
         p = Popen(["dig", "+short", "myip.opendns.com", "@resolver1.opendns.com"], stdin=PIPE, stdout=PIPE, stderr=PIPE)
         output, err = p.communicate()
@@ -83,9 +83,8 @@ def main():
         public_ip = output.decode().rstrip()
     else:
         public_ip = requests.get("https://ipv4.icanhazip.com/").text.strip()
-        # public_ip = '127.0.0.100'
 
-    ### Get zone id for the dns record we want to update
+    ### Get zone id for the DNS record we want to update
     results = get_paginated_results(
         'GET',
         CLOUDFLARE_URL + '/zones',
@@ -99,13 +98,13 @@ def main():
             cf_zone_id = zone_id
             break
     if cf_zone_id is None:
-        raise Exception("Snap, can't find zone '{}'".format(cf_domain))
+        raise Exception(f"Snap, can't find zone '{cf_domain}'")
 
     ### Get record id for the record we want to update
     if cf_subdomain == '':
         target_name = cf_domain
     else:
-        target_name = cf_subdomain + '.' + cf_domain
+        target_name = f"{cf_subdomain}.{cf_domain}"
     results = get_paginated_results(
         'GET',
         CLOUDFLARE_URL + '/zones/' + cf_zone_id + '/dns_records',
@@ -119,7 +118,7 @@ def main():
             cf_record_obj = record
             break
     if cf_record_obj is None:
-        raise Exception("Snap, can't find record '{}'".format(target_name))
+        raise Exception(f"Snap, can't find record '{target_name}'")
 
     if not quiet:
         print(json.dumps(cf_record_obj, indent=4))
@@ -130,16 +129,16 @@ def main():
         # If this record already has the correct IP, we return early
         # and don't do anything.
         if not quiet:
-            log('unchanged', '{}, {}'.format(target_name, public_ip))
+            log('unchanged', f"{target_name}, {public_ip}")
         return
 
     cf_record_obj['content'] = public_ip
     r = requests.put(
         CLOUDFLARE_URL
-            + '/zones/'
-            + cf_zone_id
-            + '/dns_records/'
-            + cf_record_obj['id'],
+        + '/zones/'
+        + cf_zone_id
+        + '/dns_records/'
+        + cf_record_obj['id'],
         headers=auth_headers,
         json=cf_record_obj
     )
@@ -147,21 +146,15 @@ def main():
     if r.status_code < 200 or r.status_code > 299:
         log(
             'error',
-            "CloudFlare returned an unexpected status code: {}, for "
-            "dns_records update request."
-            .format(r.status_code)
+            f"CloudFlare returned an unexpected status code: {r.status_code}, "
+            f"for dns_records update request."
         )
         status_was_error = True
     response = r.json()
     if response["errors"] or status_was_error:
-        die("Updating record failed with the response: '{}'".format(
-            json.dumps(response)
-        ))
+        die(f"Updating record failed with the response: '{json.dumps(response)}'")
     else:
-        log('updated', "{}, {}".format(target_name, public_ip))
-
-
-    return
+        log('updated', f"{target_name}, {public_ip}")
 
 
 def die(msg):
@@ -171,7 +164,7 @@ def die(msg):
 
 def get_paginated_results(method, url, auth_headers):
     """
-    Executes the cloudflare api call, fetches all pages and returns the
+    Executes the CloudFlare API call, fetches all pages and returns the
     concatenated result array.
     """
 
@@ -189,12 +182,8 @@ def get_paginated_results(method, url, auth_headers):
 
         if r.status_code < 200 or r.status_code > 299:
             die(
-                "CloudFlare returned an unexpected status code: {}, for "
-                "request: {}"
-                .format(
-                    r.status_code,
-                    url
-                )
+                f"CloudFlare returned an unexpected status code: {r.status_code}, "
+                f"for request: {url}"
             )
 
         response = r.json()
@@ -203,18 +192,13 @@ def get_paginated_results(method, url, auth_headers):
     return results
 
 
-
-# TODO use a real logging framework.
 def log(status, message=''):
     print(
-        "{date}, {status:>10}, '{message}'".format(
-            date=time.ctime(),
-            status=status,
-            message=message
-        )
+        f"{time.ctime()}, {status:>10}, '{message}'"
     )
     return
 
 
 if __name__ == '__main__':
     main()
+
